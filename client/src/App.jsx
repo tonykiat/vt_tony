@@ -166,6 +166,7 @@ function Dashboard({ user, onLogout }) {
   const [voiceMode, setVoiceMode] = useState("auto");
   const [subtitleMode, setSubtitleMode] = useState("both");
   const [dubEnabled, setDubEnabled] = useState(true);
+  const [ttsProvider, setTtsProvider] = useState("edge");
   const [whisperModel, setWhisperModel] = useState("small");
   const [keepOriginalAudio, setKeepOriginalAudio] = useState(false);
 
@@ -213,6 +214,7 @@ function Dashboard({ user, onLogout }) {
         form.append("voiceMode", voiceMode);
         form.append("subtitleMode", subtitleMode);
         form.append("dubEnabled", String(dubEnabled));
+        form.append("ttsProvider", ttsProvider);
         form.append("whisperModel", whisperModel);
         form.append("keepOriginalAudio", String(keepOriginalAudio));
         await api("/api/jobs/upload", { method: "POST", body: form });
@@ -259,6 +261,7 @@ function Dashboard({ user, onLogout }) {
         voiceMode,
         subtitleMode,
         dubEnabled: String(dubEnabled),
+        ttsProvider,
         whisperModel,
         keepOriginalAudio: String(keepOriginalAudio),
       }),
@@ -378,6 +381,13 @@ function Dashboard({ user, onLogout }) {
             Generate Thai dubbed audio
           </label>
           <label>
+            TTS provider
+            <select style={{ ...input, marginTop: 6 }} value={ttsProvider} onChange={(e) => setTtsProvider(e.target.value)} disabled={!dubEnabled}>
+              <option value="edge">Microsoft Thai neural voice</option>
+              <option value="elevenlabs">ElevenLabs multilingual voice</option>
+            </select>
+          </label>
+          <label>
             Thai voice
             <select style={{ ...input, marginTop: 6 }} value={voiceMode} onChange={(e) => setVoiceMode(e.target.value)} disabled={!dubEnabled}>
               <option value="auto">Auto detect speaker gender</option>
@@ -404,7 +414,7 @@ function Dashboard({ user, onLogout }) {
                   <div style={{ fontWeight: 700 }}>{job.sourceFilename}</div>
                   <div style={{ color: "#94a3b8", fontSize: 14 }}>Job #{job.id} · {job.status} · {job.progressPercent}%</div>
                   <div style={{ color: "#cbd5e1", fontSize: 14 }}>
-                    Dub: {job.dubEnabled ? job.voiceMode : "off"} · subtitles: {job.subtitleMode || "both"} · model: {job.whisperModel || "small"} · detected: {job.speakerGenderDetected || "pending"}
+                    Dub: {job.dubEnabled ? `${job.voiceMode} (${job.ttsProvider || "edge"})` : "off"} · subtitles: {job.subtitleMode || "both"} · model: {job.whisperModel || "small"} · detected: {job.speakerGenderDetected || "pending"}
                   </div>
                   <div style={{ color: "#94a3b8", fontSize: 14 }}>
                     {job.status === "done" ? "Finished" : job.status === "failed" ? "Stopped" : `ETA: about ${formatDuration(job.estimatedRemainingSeconds)} left`}

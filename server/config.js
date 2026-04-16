@@ -28,6 +28,10 @@ export const config = {
     DATABASE_URL: process.env.DATABASE_URL,
     DEFAULT_THAI_VOICE_MALE: process.env.DEFAULT_THAI_VOICE_MALE || "th-TH-NiwatNeural",
     DEFAULT_THAI_VOICE_FEMALE: process.env.DEFAULT_THAI_VOICE_FEMALE || "th-TH-PremwadeeNeural",
+    ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
+    ELEVENLABS_MODEL_ID: process.env.ELEVENLABS_MODEL_ID || "eleven_multilingual_v2",
+    ELEVENLABS_VOICE_ID_MALE: process.env.ELEVENLABS_VOICE_ID_MALE || "pNInz6obpgDQGcFmaJgB",
+    ELEVENLABS_VOICE_ID_FEMALE: process.env.ELEVENLABS_VOICE_ID_FEMALE || "21m00Tcm4TlvDq8ikWAM",
     WHISPER_MODEL: process.env.WHISPER_MODEL || "small",
   },
 };

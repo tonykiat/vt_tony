@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 from pathlib import Path
 from statistics import median
 
 import edge_tts
 import librosa
 import numpy as np
+import requests
 from deep_translator import GoogleTranslator
 from faster_whisper import WhisperModel
 
@@ -19,6 +21,10 @@ class ProviderError(RuntimeError):
 
 _MALE_VOICE = os.getenv("DEFAULT_THAI_VOICE_MALE", "th-TH-NiwatNeural")
 _FEMALE_VOICE = os.getenv("DEFAULT_THAI_VOICE_FEMALE", "th-TH-PremwadeeNeural")
+_ELEVENLABS_MALE_VOICE = os.getenv("ELEVENLABS_VOICE_ID_MALE", "pNInz6obpgDQGcFmaJgB")
+_ELEVENLABS_FEMALE_VOICE = os.getenv("ELEVENLABS_VOICE_ID_FEMALE", "21m00Tcm4TlvDq8ikWAM")
+_ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
+_ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/text-to-speech"
 _WHISPER_MODELS = {}
 
 
@@ -30,6 +36,14 @@ def choose_voice(voice_mode: str, detected_gender: str | None) -> str:
     if detected_gender == "male":
         return _MALE_VOICE
     return _FEMALE_VOICE
+
+
+def choose_tts_voice(tts_provider: str, voice_mode: str, detected_gender: str | None) -> str:
+    if tts_provider == "elevenlabs":
+        if voice_mode == "male" or detected_gender == "male":
+            return _ELEVENLABS_MALE_VOICE
+        return _ELEVENLABS_FEMALE_VOICE
+    return choose_voice(voice_mode, detected_gender)
 
 
 def detect_speaker_gender(audio_path: str, sample_seconds: int = 30) -> str | None:
@@ -113,10 +127,77 @@ async def _save_tts(text: str, voice: str, output_path: str) -> None:
     await communicator.save(output_path)
 
 
-def synthesize_thai(translated: dict, voice: str, output_path: str) -> str:
+def _split_text(text: str, max_chars: int = 2400) -> list[str]:
+    chunks = []
+    current = ""
+    for sentence in text.replace("\n", " ").split(". "):
+        candidate = f"{current}. {sentence}" if current else sentence
+        if len(candidate) <= max_chars:
+            current = candidate
+        else:
+            if current:
+                chunks.append(current.strip())
+            current = sentence
+    if current:
+        chunks.append(current.strip())
+    return chunks or [text]
+
+
+def _concat_audio(parts: list[Path], output_path: str) -> None:
+    list_path = Path(output_path).with_suffix(".concat.txt")
+    list_path.write_text("".join(f"file '{part.as_posix()}'\n" for part in parts), encoding="utf-8")
+    subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_path), "-c", "copy", output_path], check=True)
+    list_path.unlink(missing_ok=True)
+    for part in parts:
+        part.unlink(missing_ok=True)
+
+
+def _save_elevenlabs_tts(text: str, voice: str, output_path: str) -> None:
+    api_key = os.getenv("ELEVENLABS_API_KEY")
+    if not api_key:
+        raise ProviderError("ELEVENLABS_API_KEY is not configured")
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    chunks = _split_text(text)
+    part_paths = []
+    for index, chunk in enumerate(chunks):
+        response = requests.post(
+            f"{_ELEVENLABS_API_URL}/{voice}",
+            headers={
+                "xi-api-key": api_key,
+                "accept": "audio/mpeg",
+                "content-type": "application/json",
+            },
+            json={
+                "text": chunk,
+                "model_id": _ELEVENLABS_MODEL_ID,
+                "voice_settings": {
+                    "stability": 0.45,
+                    "similarity_boost": 0.75,
+                    "style": 0.15,
+                    "use_speaker_boost": True,
+                },
+            },
+            timeout=120,
+        )
+        if response.status_code >= 400:
+            raise ProviderError(f"ElevenLabs TTS failed: {response.status_code} {response.text[:200]}")
+        part_path = output.with_name(f"{output.stem}.elevenlabs-{index:04d}.mp3")
+        part_path.write_bytes(response.content)
+        part_paths.append(part_path)
+    if len(part_paths) == 1:
+        part_paths[0].replace(output)
+    else:
+        _concat_audio(part_paths, str(output))
+
+
+def synthesize_thai(translated: dict, voice: str, output_path: str, tts_provider: str = "edge") -> str:
     text = (translated.get("text") or "").strip()
     if not text:
         raise ProviderError("No translated Thai text available for TTS")
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    asyncio.run(_save_tts(text, voice, output_path))
+    if tts_provider == "elevenlabs":
+        _save_elevenlabs_tts(text, voice, output_path)
+    else:
+        asyncio.run(_save_tts(text, voice, output_path))
     return output_path

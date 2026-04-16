@@ -9,7 +9,7 @@ import psycopg
 from dotenv import load_dotenv
 
 from pipeline_lib import ffmpeg_copy_video, ffmpeg_extract_audio, ffmpeg_mux_video, ffprobe_duration, write_json, write_manifest, write_srt
-from providers import choose_voice, detect_speaker_gender, synthesize_thai, transcribe_audio, translate_segments
+from providers import choose_tts_voice, detect_speaker_gender, synthesize_thai, transcribe_audio, translate_segments
 
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
@@ -51,6 +51,7 @@ def process_job(job: dict) -> None:
     subtitle_mode = job.get("subtitle_mode") or "both"
     dub_enabled = bool(job.get("dub_enabled", True))
     whisper_model = job.get("whisper_model") or os.getenv("WHISPER_MODEL", "small")
+    tts_provider = job.get("tts_provider") or "edge"
     needs_english_subtitles = subtitle_mode in {"both", "en"}
     needs_thai_output = subtitle_mode in {"both", "th"} or dub_enabled
     paths = {
@@ -88,9 +89,9 @@ def process_job(job: dict) -> None:
                 write_srt(paths["english_srt"], transcript["segments"])
 
             detected_gender = detect_speaker_gender(paths["source_audio"])
-            voice = choose_voice(job["voice_mode"], detected_gender)
+            voice = choose_tts_voice(tts_provider, job["voice_mode"], detected_gender)
             update_job(conn, job_id, speaker_gender_detected=detected_gender, selected_voice=voice)
-            log_event(conn, job_id, "speaker_detection", f"Detected speaker gender: {detected_gender or 'unknown'}, selected voice: {voice}.")
+            log_event(conn, job_id, "speaker_detection", f"Detected speaker gender: {detected_gender or 'unknown'}, selected {tts_provider} voice: {voice}.")
 
             translated = None
             if needs_thai_output:
@@ -106,8 +107,8 @@ def process_job(job: dict) -> None:
 
             if dub_enabled:
                 update_job(conn, job_id, status="generating_voice", progress_percent=75)
-                log_event(conn, job_id, "generating_voice", f"Generating Thai narration using {voice}.")
-                synthesize_thai(translated, voice, paths["thai_audio"])
+                log_event(conn, job_id, "generating_voice", f"Generating Thai narration using {tts_provider} voice {voice}.")
+                synthesize_thai(translated, voice, paths["thai_audio"], tts_provider)
                 update_job(conn, job_id, status="muxing", progress_percent=90)
                 log_event(conn, job_id, "muxing", "Muxing Thai narration and requested subtitle tracks back into MP4.")
                 ffmpeg_mux_video(paths["source_video"], paths["thai_audio"], paths["source_audio"], paths["output_video"], bool(job["keep_original_audio"]), english_srt, thai_srt)
@@ -124,6 +125,7 @@ def process_job(job: dict) -> None:
                 "dub_enabled": dub_enabled,
                 "subtitle_mode": subtitle_mode,
                 "whisper_model": whisper_model,
+                "tts_provider": tts_provider,
                 "speaker_gender_detected": detected_gender,
                 "selected_voice": voice,
                 "source_video_path": paths["source_video"],

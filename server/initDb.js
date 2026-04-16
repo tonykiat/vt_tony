@@ -49,6 +49,7 @@ async function main() {
         selected_voice TEXT NOT NULL DEFAULT 'auto',
         subtitle_mode TEXT NOT NULL DEFAULT 'both' CHECK (subtitle_mode IN ('both','en','th','none')),
         dub_enabled BOOLEAN NOT NULL DEFAULT true,
+        tts_provider TEXT NOT NULL DEFAULT 'edge' CHECK (tts_provider IN ('edge','elevenlabs')),
         whisper_model TEXT NOT NULL DEFAULT 'small' CHECK (whisper_model IN ('tiny','base','small','medium')),
         speaker_gender_detected TEXT CHECK (speaker_gender_detected IN ('male','female') OR speaker_gender_detected IS NULL),
         keep_original_audio BOOLEAN NOT NULL DEFAULT false,
@@ -63,6 +64,7 @@ async function main() {
 
     await client.query(`ALTER TABLE video_jobs ADD COLUMN IF NOT EXISTS subtitle_mode TEXT NOT NULL DEFAULT 'both' CHECK (subtitle_mode IN ('both','en','th','none'))`);
     await client.query(`ALTER TABLE video_jobs ADD COLUMN IF NOT EXISTS dub_enabled BOOLEAN NOT NULL DEFAULT true`);
+    await client.query(`ALTER TABLE video_jobs ADD COLUMN IF NOT EXISTS tts_provider TEXT NOT NULL DEFAULT 'edge' CHECK (tts_provider IN ('edge','elevenlabs'))`);
     await client.query(`ALTER TABLE video_jobs ADD COLUMN IF NOT EXISTS whisper_model TEXT NOT NULL DEFAULT 'small' CHECK (whisper_model IN ('tiny','base','small','medium'))`);
 
     await client.query(`

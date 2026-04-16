@@ -93,10 +93,12 @@ function jobOptionsFromBody(body = {}) {
   const voiceMode = ["auto", "male", "female"].includes(body.voiceMode) ? body.voiceMode : config.defaultVoiceMode;
   const subtitleMode = ["both", "en", "th", "none"].includes(body.subtitleMode) ? body.subtitleMode : "both";
   const whisperModel = ["tiny", "base", "small", "medium"].includes(body.whisperModel) ? body.whisperModel : "small";
+  const ttsProvider = ["edge", "elevenlabs"].includes(body.ttsProvider) ? body.ttsProvider : "edge";
   return {
     voiceMode,
     subtitleMode,
     whisperModel,
+    ttsProvider,
     dubEnabled: String(body.dubEnabled ?? "true") === "true",
     keepOriginalAudio: String(body.keepOriginalAudio || config.keepOriginalAudioDefault) === "true",
   };
@@ -170,8 +172,8 @@ async function recoverInterruptedJobs() {
 async function createQueuedMp4Job({ req, sourceFilename, sourcePath, uploadMessage }) {
   const options = jobOptionsFromBody(req.body);
   const inserted = await pool.query(
-    `INSERT INTO video_jobs (source_filename, source_video_path, status, progress_percent, source_language, target_language, voice_mode, selected_voice, subtitle_mode, dub_enabled, whisper_model, keep_original_audio, provider_bundle, created_by)
-     VALUES ($1, $2, 'uploaded', 5, 'en', $3, $4, $5, $6, $7, $8, $9, 'mvp-api', $10)
+    `INSERT INTO video_jobs (source_filename, source_video_path, status, progress_percent, source_language, target_language, voice_mode, selected_voice, subtitle_mode, dub_enabled, tts_provider, whisper_model, keep_original_audio, provider_bundle, created_by)
+     VALUES ($1, $2, 'uploaded', 5, 'en', $3, $4, $5, $6, $7, $8, $9, $10, 'mvp-api', $11)
      RETURNING *`,
     [
       sourceFilename,
@@ -181,6 +183,7 @@ async function createQueuedMp4Job({ req, sourceFilename, sourcePath, uploadMessa
       options.voiceMode === "auto" ? "auto-by-detection" : `${options.voiceMode}-preferred`,
       options.subtitleMode,
       options.dubEnabled,
+      options.ttsProvider,
       options.whisperModel,
       options.keepOriginalAudio,
       req.user.id,
@@ -322,8 +325,8 @@ app.post("/api/jobs/upload", authRequired, hydrateUser, approvedRequired, upload
   }
 
   const inserted = await pool.query(
-    `INSERT INTO video_jobs (source_filename, source_video_path, status, progress_percent, source_language, target_language, voice_mode, selected_voice, subtitle_mode, dub_enabled, whisper_model, keep_original_audio, provider_bundle, created_by)
-     VALUES ($1, $2, 'uploaded', 5, 'en', $3, $4, $5, $6, $7, $8, $9, 'mvp-api', $10)
+    `INSERT INTO video_jobs (source_filename, source_video_path, status, progress_percent, source_language, target_language, voice_mode, selected_voice, subtitle_mode, dub_enabled, tts_provider, whisper_model, keep_original_audio, provider_bundle, created_by)
+     VALUES ($1, $2, 'uploaded', 5, 'en', $3, $4, $5, $6, $7, $8, $9, $10, 'mvp-api', $11)
      RETURNING *`,
     [
       sourceFilename,
@@ -333,6 +336,7 @@ app.post("/api/jobs/upload", authRequired, hydrateUser, approvedRequired, upload
       options.voiceMode === "auto" ? "auto-by-detection" : `${options.voiceMode}-preferred`,
       options.subtitleMode,
       options.dubEnabled,
+      options.ttsProvider,
       options.whisperModel,
       options.keepOriginalAudio,
       req.user.id,

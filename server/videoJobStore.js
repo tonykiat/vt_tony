@@ -22,7 +22,8 @@ function estimateTotalSeconds(row) {
   const duration = Number(row.duration_seconds || 0);
   if (!duration) return null;
   const modelFactor = MODEL_SPEED_FACTOR[row.whisper_model] || MODEL_SPEED_FACTOR.small;
-  const dubFactor = row.dub_enabled ? 0.8 : 0.15;
+  const ttsFactor = row.tts_provider === "elevenlabs" ? 1.1 : 0.8;
+  const dubFactor = row.dub_enabled ? ttsFactor : 0.15;
   const thaiFactor = row.subtitle_mode === "th" || row.subtitle_mode === "both" || row.dub_enabled ? 0.35 : 0;
   return Math.max(30, Math.round(duration * (modelFactor + dubFactor + thaiFactor + 0.2)));
 }
@@ -68,6 +69,7 @@ export function toJob(row) {
     selectedVoice: row.selected_voice,
     subtitleMode: row.subtitle_mode,
     dubEnabled: row.dub_enabled,
+    ttsProvider: row.tts_provider,
     whisperModel: row.whisper_model,
     speakerGenderDetected: row.speaker_gender_detected,
     keepOriginalAudio: row.keep_original_audio,
