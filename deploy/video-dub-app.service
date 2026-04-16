@@ -1,0 +1,15 @@
+[Unit]
+Description=VT TonyAI Video Dub App
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/video-dub-app
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /root/video-dub-app/server/index.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,4 @@
+vt.tonyai.au {
+	import common
+	reverse_proxy 127.0.0.1:4310
+}

@@ -1,0 +1,11 @@
+requests>=2.32.0
+python-dotenv>=1.0.1
+psycopg[binary]>=3.2.1
+faster-whisper>=1.1.1
+deep-translator>=1.11.4
+edge-tts>=6.1.18
+librosa>=0.10.2
+soundfile>=0.12.1
+numpy>=1.26.4
+scipy>=1.13.1
+yt-dlp>=2025.8.27
