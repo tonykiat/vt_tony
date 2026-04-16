@@ -1,5 +1,42 @@
 import { pool } from "./db.js";
 
+const MODEL_SPEED_FACTOR = {
+  tiny: 0.8,
+  base: 1.2,
+  small: 2.8,
+  medium: 8.0,
+};
+const STAGE_PROGRESS_FLOOR = {
+  uploaded: 0,
+  queued: 0,
+  extracting_audio: 0.08,
+  transcribing: 0.12,
+  translating: 0.7,
+  generating_voice: 0.82,
+  muxing: 0.94,
+  done: 1,
+  failed: 0,
+};
+
+function estimateTotalSeconds(row) {
+  const duration = Number(row.duration_seconds || 0);
+  if (!duration) return null;
+  const modelFactor = MODEL_SPEED_FACTOR[row.whisper_model] || MODEL_SPEED_FACTOR.small;
+  const dubFactor = row.dub_enabled ? 0.8 : 0.15;
+  const thaiFactor = row.subtitle_mode === "th" || row.subtitle_mode === "both" || row.dub_enabled ? 0.35 : 0;
+  return Math.max(30, Math.round(duration * (modelFactor + dubFactor + thaiFactor + 0.2)));
+}
+
+function estimateRemainingSeconds(row) {
+  if (row.status === "done" || row.status === "failed") return 0;
+  const total = estimateTotalSeconds(row);
+  if (!total) return null;
+  const floor = STAGE_PROGRESS_FLOOR[row.status] ?? 0;
+  const progress = Math.max(floor, Math.min(0.98, Number(row.progress_percent || 0) / 100));
+  const remaining = Math.max(0, Math.round(total * (1 - progress)));
+  return remaining;
+}
+
 export function toUser(row) {
   return {
     id: row.id,
@@ -36,6 +73,8 @@ export function toJob(row) {
     keepOriginalAudio: row.keep_original_audio,
     providerBundle: row.provider_bundle,
     durationSeconds: row.duration_seconds,
+    estimatedTotalSeconds: estimateTotalSeconds(row),
+    estimatedRemainingSeconds: estimateRemainingSeconds(row),
     errorMessage: row.error_message,
     createdBy: row.created_by,
     createdAt: row.created_at,

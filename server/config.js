@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const maxUploadMb = Number(process.env.MAX_UPLOAD_MB || 500);
+const maxParallelJobs = Number(process.env.MAX_PARALLEL_JOBS || 2);
 
 export const config = {
   port: Number(process.env.PORT || 4310),
@@ -19,6 +20,7 @@ export const config = {
   videoStorageRoot: process.env.VIDEO_STORAGE_ROOT || "/home/paperclip/video_dubber",
   maxUploadBytes: maxUploadMb * 1024 * 1024,
   maxUploadMb,
+  maxParallelJobs,
   defaultVoiceMode: process.env.DEFAULT_VOICE_MODE || "auto",
   defaultTargetLanguage: process.env.DEFAULT_TARGET_LANGUAGE || "th",
   keepOriginalAudioDefault: String(process.env.KEEP_ORIGINAL_AUDIO_DEFAULT || "false") === "true",

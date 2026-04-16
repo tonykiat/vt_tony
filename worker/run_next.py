@@ -65,6 +65,15 @@ def process_job(job: dict) -> None:
     }
     with psycopg.connect(DATABASE_URL) as conn:
         try:
+            last_transcribe_progress = 35
+
+            def update_transcribe_progress(progress: int) -> None:
+                nonlocal last_transcribe_progress
+                progress = int(progress)
+                if progress >= last_transcribe_progress + 2:
+                    last_transcribe_progress = progress
+                    update_job(conn, job_id, progress_percent=progress)
+
             update_job(conn, job_id, status="extracting_audio", progress_percent=20, source_audio_path=paths["source_audio"], transcript_json_path=paths["transcript"], translated_json_path=paths["translated"], thai_audio_path=paths["thai_audio"], output_video_path=paths["output_video"])
             log_event(conn, job_id, "extracting_audio", "Extracting mono 16kHz audio from uploaded MP4.")
             ffmpeg_extract_audio(paths["source_video"], paths["source_audio"])
@@ -73,7 +82,7 @@ def process_job(job: dict) -> None:
 
             update_job(conn, job_id, status="transcribing", progress_percent=35)
             log_event(conn, job_id, "transcribing", f"Running English speech transcription with Whisper {whisper_model}.")
-            transcript = transcribe_audio(paths["source_audio"], whisper_model)
+            transcript = transcribe_audio(paths["source_audio"], whisper_model, update_transcribe_progress)
             write_json(paths["transcript"], transcript)
             if needs_english_subtitles:
                 write_srt(paths["english_srt"], transcript["segments"])

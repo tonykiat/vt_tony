@@ -56,9 +56,10 @@ def _get_whisper_model(model_name: str | None = None) -> WhisperModel:
     return _WHISPER_MODELS[model_name]
 
 
-def transcribe_audio(audio_path: str, model_name: str | None = None) -> dict:
+def transcribe_audio(audio_path: str, model_name: str | None = None, progress_callback=None) -> dict:
     model = _get_whisper_model(model_name)
     segments, info = model.transcribe(audio_path, vad_filter=True, beam_size=5, language="en")
+    duration = round(float(getattr(info, "duration", 0.0) or 0.0), 3)
     output_segments = []
     text_parts = []
     for seg in segments:
@@ -72,11 +73,13 @@ def transcribe_audio(audio_path: str, model_name: str | None = None) -> dict:
         }
         output_segments.append(item)
         text_parts.append(text)
+        if progress_callback and duration:
+            progress_callback(min(52, 35 + int((float(seg.end) / duration) * 17)))
     if not output_segments:
         raise ProviderError("Transcription produced no speech segments")
     return {
         "language": getattr(info, "language", "en") or "en",
-        "duration": round(float(getattr(info, "duration", 0.0) or 0.0), 3),
+        "duration": duration,
         "text": " ".join(text_parts),
         "segments": output_segments,
     }

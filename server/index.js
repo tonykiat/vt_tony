@@ -26,6 +26,8 @@ const CHUNK_UPLOAD_DIR = "/tmp/video-dub-app-chunk-uploads";
 const CHUNK_SIZE_LIMIT_BYTES = 20 * 1024 * 1024;
 const chunkUpload = multer({ dest: CHUNK_UPLOAD_DIR, limits: { fileSize: CHUNK_SIZE_LIMIT_BYTES } });
 const appOrigin = new URL(config.appUrl).origin;
+const activeWorkers = new Map();
+const ACTIVE_JOB_STATUSES = ["extracting_audio", "transcribing", "translating", "generating_voice", "muxing"];
 
 ensureStorageLayout();
 fs.mkdirSync("/tmp/video-dub-app-uploads", { recursive: true });
@@ -100,17 +102,69 @@ function jobOptionsFromBody(body = {}) {
   };
 }
 
+function activeWorkerCount() {
+  return activeWorkers.size;
+}
+
+async function activeJobCount() {
+  const result = await pool.query(`SELECT COUNT(*)::int AS count FROM video_jobs WHERE status = ANY($1)`, [ACTIVE_JOB_STATUSES]);
+  return Number(result.rows[0]?.count || 0);
+}
+
 function spawnWorker(jobId) {
+  if (activeWorkers.has(jobId)) return false;
   const pythonBin = path.join(__dirname, "..", ".venv", "bin", "python");
   const workerPath = path.join(__dirname, "..", "worker", "run_next.py");
   const env = { ...process.env, ...config.workerEnvOverrides };
   const subprocess = childProcess.spawn(pythonBin, [workerPath, "--job-id", String(jobId)], {
-    detached: true,
+    detached: false,
     stdio: "ignore",
     cwd: path.join(__dirname, ".."),
     env,
   });
-  subprocess.unref();
+  activeWorkers.set(jobId, subprocess);
+  subprocess.once("exit", () => {
+    activeWorkers.delete(jobId);
+    setImmediate(dispatchQueuedJobs);
+  });
+  subprocess.once("error", () => {
+    activeWorkers.delete(jobId);
+    setImmediate(dispatchQueuedJobs);
+  });
+  return true;
+}
+
+async function dispatchQueuedJobs() {
+  const available = Math.max(0, config.maxParallelJobs - Math.max(activeWorkerCount(), await activeJobCount()));
+  if (!available) return;
+  const result = await pool.query(
+    `SELECT id FROM video_jobs
+     WHERE status = 'queued'
+     ORDER BY created_at ASC
+     LIMIT $1`,
+    [available],
+  );
+  for (const row of result.rows) {
+    if (activeWorkerCount() >= config.maxParallelJobs) break;
+    spawnWorker(row.id);
+  }
+}
+
+async function recoverInterruptedJobs() {
+  const result = await pool.query(
+    `UPDATE video_jobs
+     SET status = 'queued', progress_percent = 10, updated_at = NOW()
+     WHERE status = ANY($1)
+     RETURNING id`,
+    [ACTIVE_JOB_STATUSES],
+  );
+  for (const row of result.rows) {
+    await pool.query(
+      `INSERT INTO video_job_events (job_id, stage, message) VALUES ($1, $2, $3)`,
+      [row.id, "recovery", "Job was interrupted by a service restart and has been re-queued."],
+    );
+  }
+  return result.rowCount;
 }
 
 async function createQueuedMp4Job({ req, sourceFilename, sourcePath, uploadMessage }) {
@@ -145,7 +199,7 @@ async function createQueuedMp4Job({ req, sourceFilename, sourcePath, uploadMessa
     `INSERT INTO video_job_events (job_id, stage, message) VALUES ($1, $2, $3), ($1, $4, $5)`,
     [job.id, "upload", uploadMessage, "queue", "Job queued for English to Thai dubbing."],
   );
-  spawnWorker(job.id);
+  dispatchQueuedJobs();
   return getJobForUser(job.id, req.user);
 }
 
@@ -164,7 +218,7 @@ async function prepareYouTubeJob(job, paths, youtubeUrl) {
       [`${title}.mp4`, paths.sourceVideoPath, job.id],
     );
     await pool.query(`INSERT INTO video_job_events (job_id, stage, message) VALUES ($1, $2, $3)`, [job.id, 'queue', 'YouTube video downloaded and queued for English to Thai dubbing.']);
-    spawnWorker(job.id);
+    dispatchQueuedJobs();
   } catch (error) {
     await pool.query(`UPDATE video_jobs SET status = 'failed', error_message = $1, updated_at = NOW() WHERE id = $2`, [error.stderr || error.message || 'Failed to prepare source video.', job.id]);
     await pool.query(`INSERT INTO video_job_events (job_id, stage, message) VALUES ($1, $2, $3)`, [job.id, 'failed', `Source preparation failed: ${error.message}`]);
@@ -297,7 +351,7 @@ app.post("/api/jobs/upload", authRequired, hydrateUser, approvedRequired, upload
         [paths.sourceVideoPath, job.id],
       );
       await pool.query(`INSERT INTO video_job_events (job_id, stage, message) VALUES ($1, $2, $3), ($1, $4, $5)`, [job.id, "upload", "MP4 uploaded successfully.", "queue", "Job queued for English to Thai dubbing."]);
-      spawnWorker(job.id);
+      dispatchQueuedJobs();
     } else {
       await pool.query(`INSERT INTO video_job_events (job_id, stage, message) VALUES ($1, $2, $3)`, [job.id, 'youtube', `Downloading source video from ${youtubeUrl}`]);
       prepareYouTubeJob(job, paths, youtubeUrl);
@@ -384,8 +438,9 @@ app.post("/api/jobs/upload/complete", authRequired, hydrateUser, approvedRequire
 });
 
 app.get("/api/jobs", authRequired, hydrateUser, approvedRequired, async (req, res) => {
+  await dispatchQueuedJobs();
   const jobs = await listJobsForUser(req.user);
-  res.json({ jobs });
+  res.json({ jobs, worker: { active: await activeJobCount(), maxParallel: config.maxParallelJobs } });
 });
 
 app.get("/api/jobs/:id", authRequired, hydrateUser, approvedRequired, async (req, res) => {
@@ -401,7 +456,7 @@ app.post("/api/jobs/:id/retry", authRequired, hydrateUser, approvedRequired, asy
   if (job.status !== "failed") return res.status(400).json({ error: "Only failed jobs can be retried." });
   await pool.query(`UPDATE video_jobs SET status = 'queued', progress_percent = 10, error_message = NULL, updated_at = NOW() WHERE id = $1`, [job.id]);
   await pool.query(`INSERT INTO video_job_events (job_id, stage, message) VALUES ($1, $2, $3)`, [job.id, "retry", "Job re-queued by user."]);
-  spawnWorker(job.id);
+  dispatchQueuedJobs();
   const fresh = await getJobForUser(job.id, req.user);
   res.json({ job: fresh });
 });
@@ -456,4 +511,10 @@ app.use((error, _req, res, _next) => {
 
 app.listen(config.port, "127.0.0.1", () => {
   console.log(`video-dub-app listening on 127.0.0.1:${config.port}`);
+  recoverInterruptedJobs()
+    .then((count) => {
+      if (count) console.log(`Recovered ${count} interrupted job(s).`);
+      return dispatchQueuedJobs();
+    })
+    .catch((error) => console.error("Failed to dispatch queued jobs", error));
 });

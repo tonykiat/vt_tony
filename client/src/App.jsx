@@ -85,6 +85,20 @@ function formatBytes(bytes) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function formatDuration(seconds) {
+  if (seconds == null) return "estimating";
+  const safe = Math.max(0, Math.round(Number(seconds) || 0));
+  const minutes = Math.floor(safe / 60);
+  const secs = safe % 60;
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    const remMinutes = minutes % 60;
+    return `${hours}h ${remMinutes}m`;
+  }
+  if (minutes > 0) return `${minutes}m ${secs}s`;
+  return `${secs}s`;
+}
+
 function AuthForm({ onAuthed }) {
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({ email: "", password: "", fullName: "", timezone: "Australia/Sydney" });
@@ -141,6 +155,7 @@ function AuthForm({ onAuthed }) {
 function Dashboard({ user, onLogout }) {
   const fileInputRef = useRef(null);
   const [jobs, setJobs] = useState([]);
+  const [worker, setWorker] = useState(null);
   const [users, setUsers] = useState([]);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -158,6 +173,7 @@ function Dashboard({ user, onLogout }) {
     try {
       const data = await api("/api/jobs");
       setJobs(data.jobs || []);
+      setWorker(data.worker || null);
     } catch (err) {
       setError(err.message);
     }
@@ -273,6 +289,7 @@ function Dashboard({ user, onLogout }) {
           <div style={{ color: "#7dd3fc", fontSize: 13, textTransform: "uppercase", letterSpacing: 2 }}>VT TonyAI</div>
           <h2 style={{ margin: "8px 0 4px", fontSize: 32 }}>Welcome, {user.fullName}</h2>
           <div style={{ color: "#94a3b8" }}>{user.email} · {user.role} · {user.status}</div>
+          {worker ? <div style={{ color: "#cbd5e1", fontSize: 14, marginTop: 6 }}>Workers: {worker.active}/{worker.maxParallel} running</div> : null}
         </div>
         <button style={button} onClick={onLogout}>Log out</button>
       </section>
@@ -388,6 +405,10 @@ function Dashboard({ user, onLogout }) {
                   <div style={{ color: "#94a3b8", fontSize: 14 }}>Job #{job.id} · {job.status} · {job.progressPercent}%</div>
                   <div style={{ color: "#cbd5e1", fontSize: 14 }}>
                     Dub: {job.dubEnabled ? job.voiceMode : "off"} · subtitles: {job.subtitleMode || "both"} · model: {job.whisperModel || "small"} · detected: {job.speakerGenderDetected || "pending"}
+                  </div>
+                  <div style={{ color: "#94a3b8", fontSize: 14 }}>
+                    {job.status === "done" ? "Finished" : job.status === "failed" ? "Stopped" : `ETA: about ${formatDuration(job.estimatedRemainingSeconds)} left`}
+                    {job.durationSeconds ? ` · video: ${formatDuration(job.durationSeconds)}` : ""}
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
